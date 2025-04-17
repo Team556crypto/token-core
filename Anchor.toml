@@ -6,7 +6,7 @@ skip-lint = false
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "mainnet"
+cluster = "https://mainnet.helius-rpc.com/?api-key=5654c7b6-c88b-4cbf-a0aa-68fc3e84adb1"
 wallet = "mainnet-test-wallets/treasury.json"
 
 [scripts]

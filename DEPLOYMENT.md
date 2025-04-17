@@ -32,14 +32,10 @@ This comprehensive guide covers every step required to deploy, configure, secure
     - [6. Best Practices](#6-best-practices)
     - [7. Verifying Program Upgrades](#7-verifying-program-upgrades)
   - [6. SPL Token Creation \& Configuration](#6-spl-token-creation--configuration)
-  - [6a. Setting Token Metadata](#6a-setting-token-metadata)
-    - [Option 1: Using Metaplex Umi SDK (Recommended)](#option-1-using-metaplex-umi-sdk-recommended)
-    - [Option 2: Using Metaplex JS SDK (Alternative)](#option-2-using-metaplex-js-sdk-alternative)
-    - [Option 3: Using Solana Token Extensions (Newer Approach)](#option-3-using-solana-token-extensions-newer-approach)
-    - [Verifying Metadata](#verifying-metadata)
-  - [7. DEX Liquidity \& LP Token Burning](#7-dex-liquidity--lp-token-burning)
-  - [8. Vesting Account Initialization](#8-vesting-account-initialization)
+  - [7. Vesting Account Initialization](#7-vesting-account-initialization)
+  - [8. DEX Liquidity \& LP Token Burning](#8-dex-liquidity--lp-token-burning)
   - [9. Claiming Unlocked Tokens](#9-claiming-unlocked-tokens)
+  - [10. Finalizing Token Setup](#10-finalizing-token-setup)
 
 ---
 
@@ -119,11 +115,27 @@ This comprehensive guide covers every step required to deploy, configure, secure
   ```sh
   anchor build
   ```
-- **Deploy the program**:
+- **Deploy the program** (two methods):
+
+  **Method 1: Direct deployment** (works best on devnet or with low network congestion):
+
   ```sh
   anchor deploy
   ```
-- **Note the program ID** output by Anchor. Update your frontend/client as needed.
+
+  **Method 2: Manual buffer deployment** (recommended for mainnet)\*\*:
+
+  ```sh
+  # Step 1: Write program to buffer
+  solana program write-buffer target/deploy/team.so
+  # Note the buffer address from output (e.g., 6A5EQy6A1Xc3SK23J7vvNjTtADfmynuXSTBdmqTtCRq4)
+
+  # Step 2: Deploy from buffer
+  solana program deploy --buffer <BUFFER_ADDRESS> target/deploy/team.so
+  ```
+
+- **Note the program ID** output by deployment (e.g., Dh1XbaChDA7daGUncgRgDHFRDjGqd953PhxcHQvU8Qrc).
+- **Update your `Anchor.toml` and client code** with the new program ID.
 - **Set the correct `ADMIN_PUBKEY`** in `lib.rs` before deployment.
 - **Upgrade the program** (if needed):
 
@@ -255,7 +267,7 @@ For critical upgrades, conduct a full suite of tests against the on-chain progra
 
   ```sh
   spl-token create-token --owner /path/to/admin.json --decimals 9
-  # Save the mint address as $TEAM_MINT (e.g., export TEAM_MINT=3CPWoCJvtaSG4QhYHgzEFShzwLNnr6fh3PQURQF29ujs)
+  # Save the mint address as $TEAM_MINT (e.g., export TEAM_MINT=BomWBaPd9hm58Qgyb3uBube7uUrXmPs9D9ApkVRw2gyu)
   ```
 
   > **Note:** The wallet specified with `--owner` becomes the initial mint authority. Save this keypair securely, as it is required for metadata setup and to disable minting later.
@@ -274,8 +286,13 @@ For critical upgrades, conduct a full suite of tests against the on-chain progra
 
   ```sh
   spl-token create-account <TEAM_MINT>
-  # This creates a token account for your configured wallet (the admin)
-  # Save this token account address for minting (e.g., J61s3yHFDvzVziM1nAsoWrTJmRo2Z5T2vahv4kMXHLgX)
+  ```
+
+- **Export the token account address:**
+
+  ```sh
+  export ADMIN_TOKEN_ACCOUNT_ADDRESS=<TOKEN_ACCOUNT_ADDRESS>
+  # Save this token account address for minting (e.g., HiQzADiGbHkbyGwGuVux2zkFs1eFL1FLfjpTs9CFLbrJ)
   ```
 
   > **IMPORTANT:** In Solana, tokens must be sent to token accounts, not directly to wallet addresses. Each wallet needs a token account for each type of token it will hold.
@@ -298,6 +315,106 @@ For critical upgrades, conduct a full suite of tests against the on-chain progra
   > - **Vesting logic is enforced by the Anchor program, not by the token account type.** After creating the token account, you must initialize the vesting schedule for each wallet using the Anchor program's `initialize_vesting` instruction (see the Vesting Account Initialization section).
   > - You only need to run this command **once per wallet per mint**. If a wallet already has a token account for the $TEAM mint, you do not need to create it again.
 
+- **Set up token metadata** (BEFORE minting initial supply):
+
+  Create a script file named `complete-metadata.js` with the following content:
+
+  ```javascript
+  // This example uses @metaplex-foundation/js and @solana/web3.js
+  // Install with: npm install @metaplex-foundation/js @solana/web3.js
+
+  import { Metaplex } from '@metaplex-foundation/js'
+  import { Connection, Keypair, PublicKey } from '@solana/web3.js'
+  import fs from 'fs'
+
+  async function setupTokenMetadata() {
+    console.log('Connecting to Mainnet...')
+    // Connect to your preferred RPC endpoint
+    const connection = new Connection(process.env.RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY')
+
+    console.log('Loading wallet keypair...')
+    // Load the keypair (must be the mint authority)
+    const keypairData = JSON.parse(fs.readFileSync('/path/to/admin.json', 'utf-8'))
+    const keypair = Keypair.fromSecretKey(new Uint8Array(keypairData))
+    console.log(`Using keypair with public key: ${keypair.publicKey.toString()}`)
+
+    // Load metadata from a JSON file (create this file with your token's metadata)
+    console.log('Loading metadata from token-metadata.json...')
+    const metadata = JSON.parse(fs.readFileSync('token-metadata.json', 'utf-8'))
+    console.log('Metadata loaded:', metadata)
+
+    // Initialize Metaplex with your connection and keypair
+    const metaplex = Metaplex.make(connection).use({ identity: keypair })
+
+    console.log('Uploading complete metadata to Arweave...')
+    const { uri } = await metaplex.nfts().uploadMetadata(metadata)
+    console.log(`Metadata uploaded successfully to: ${uri}`)
+
+    // Your token mint address
+    const mintAddress = new PublicKey(process.env.TEAM_MINT)
+    console.log('Creating on-chain metadata...')
+
+    const { response } = await metaplex.nfts().createSft({
+      uri,
+      name: metadata.name,
+      symbol: metadata.symbol,
+      sellerFeeBasisPoints: 0, // No royalties
+      isCollection: false,
+      mintAddress
+    })
+
+    console.log('\n==== TOKEN METADATA CREATED SUCCESSFULLY ====')
+    console.log(`Transaction signature: ${response.signature}`)
+    console.log(`Explorer URL: https://explorer.solana.com/tx/${response.signature}`)
+    console.log(`Token URL: https://explorer.solana.com/address/${mintAddress.toString()}`)
+
+    console.log('\nMetadata Summary:')
+    console.log(`- Name: ${metadata.name}`)
+    console.log(`- Symbol: ${metadata.symbol}`)
+    console.log(`- Description: ${metadata.description}`)
+    console.log(`- Image: ${metadata.image}`)
+    if (metadata.extensions?.website) console.log(`- Website: ${metadata.extensions.website}`)
+    if (metadata.extensions?.x) console.log(`- X/Twitter: ${metadata.extensions.x}`)
+    console.log(`- Complete Metadata URI: ${uri}`)
+
+    console.log('\nToken metadata setup complete!')
+  }
+
+  setupTokenMetadata().catch(console.error)
+  ```
+
+  Create a `token-metadata.json` file with your token's metadata:
+
+  ```json
+  {
+    "name": "Team556 Coin",
+    "symbol": "TEAM",
+    "description": "A secure Solana token designed for the firearms industry, offering lower fees, faster settlements, and enhanced privacy.",
+    "image": "https://your-image-url.com/team556-logo.png",
+    "external_url": "https://www.team556.com/",
+    "extensions": {
+      "website": "https://www.team556.com/",
+      "x": "https://x.com/team556"
+    }
+  }
+  ```
+
+  Run the script to create the metadata:
+
+  ```sh
+  # Install required dependencies
+  npm install @metaplex-foundation/js @solana/web3.js
+
+  # Set environment variables
+  export TEAM_MINT=your_mint_address_here
+  export RPC_URL=your_rpc_url_here
+
+  # Run the script
+  node complete-metadata.js
+  ```
+
+  > **⚠️ CRITICAL:** You must set token metadata BEFORE minting your total supply. The metadata creation process requires mint authority permissions.
+
 - **Mint the initial supply** (1B tokens):
 
   ```sh
@@ -319,34 +436,6 @@ For critical upgrades, conduct a full suite of tests against the on-chain progra
   > - $TEAM is a standard SPL token with **9 decimals**. The actual supply will be 1,000,000,000 × 10^9 = 1,000,000,000,000,000,000 in base units.
   > - **CRITICAL:** Never mint directly to a wallet address (e.g., Azo57NjfCLHjfztDkDmrDLNN4CxLByVa8QSBqJEZUXDK) - always mint to a token account.
 
-- **Add token metadata BEFORE disabling minting**:
-
-  **⚠️ CRITICAL: You must set token metadata BEFORE disabling minting (revoking mint authority). ⚠️**
-
-  If you've already revoked mint authority, you'll need to create a new token and follow the correct order of operations. For existing tokens without metadata, consider using off-chain methods like token listing services to display metadata without requiring on-chain verification.
-
-  **Follow this order:**
-
-  1. Create token mint (done in previous step)
-  2. Set up token metadata (detailed in section 6a below)
-  3. THEN disable minting (next step)
-
-  See the [Setting Token Metadata](#6a-setting-token-metadata) section below for detailed instructions on setting up token metadata. Complete that step now, before proceeding to disable minting.
-
-- **Disable minting** (enforce fixed supply):
-
-  ```sh
-  # Ensure you are using the mint authority keypair (see above)
-  solana address # Should match the mint authority
-
-  spl-token authorize <TEAM_MINT> mint --disable
-  ```
-
-  > **Note:**
-  >
-  > - You must sign with the current mint authority. If you get an `OwnerMismatch` error, verify your keypair configuration with `solana address`.
-  > - This action is irreversible - once you disable minting, you cannot add more tokens or add metadata through standard methods.
-
 - **Verify token configuration:**
 
   ```sh
@@ -354,9 +443,9 @@ For critical upgrades, conduct a full suite of tests against the on-chain progra
   spl-token display <TEAM_MINT>
 
   # Expected output will include:
-  # - Mint authority: (not set)  - Confirms minting is disabled
-  # - Decimals: 9               - Confirms decimal precision
-  # - Supply: 1000000000000000000 - Confirms total supply (1B with 9 decimals)
+  # - Mint authority: <YOUR_WALLET> - Shows mint authority is still active
+  # - Decimals: 9                  - Confirms decimal precision
+  # - Supply: 1000000000000000000  - Confirms total supply (1B with 9 decimals)
   ```
 
 - **Additional verification steps:**
@@ -372,216 +461,63 @@ For critical upgrades, conduct a full suite of tests against the on-chain progra
   spl-token account-info <TEAM_MINT>
   ```
 
-> **TIP:** When using the commands above, replace `<TEAM_MINT>` with the actual mint address (e.g., 3CPWoCJvtaSG4QhYHgzEFShzwLNnr6fh3PQURQF29ujs) unless you've exported it as an environment variable with `export TEAM_MINT=...`
+> **TIP:** When using the commands above, replace `<TEAM_MINT>` with the actual mint address (e.g., BomWBaPd9hm58Qgyb3uBube7uUrXmPs9D9ApkVRw2gyu) unless you've exported it as an environment variable with `export TEAM_MINT=...`
 
-## 6a. Setting Token Metadata
+## 7. Vesting Account Initialization
 
-There are several approaches to adding metadata to your $TEAM token. The approach in the original guide using `@metaplex/cli` is no longer available as that package has been deprecated. Here are the current methods:
+- **Use the Anchor client or CLI** to call `initialize_vesting` for each vesting wallet.
+- **Schedules:**
+  - **Dev (2 wallets, 25M each):** 5% at 2w, 15% at 24w, 30% at 30w, 50% at 36w
+  - **Marketing (1 wallet, 100M):** 10% at 2w, 15% at 6w, 25% at 10w, 50% at 14w
+  - **Presale 1 (172 wallets, 1M each):** 50% at 4w, 50% at 8w
+  - **Presale 2 (100 wallets, 500k each):** 100% at 12w
+- **Example TypeScript call:**
+  ```ts
+  await program.methods
+    .initializeVesting(walletType, totalAmount, [
+      { releaseTime: <UNIX_TIMESTAMP>, amount: <AMOUNT> },
+      // ...
+    ])
+    .accounts({
+      vestingAccount: <VESTING_ACCOUNT_PUBKEY>,
+      admin: <ADMIN_PUBKEY>,
+      beneficiary: <BENEFICIARY_PUBKEY>,
+      mint: <TEAM_MINT_PUBKEY>,
+      systemProgram: web3.SystemProgram.programId,
+    })
+    .signers([<ADMIN_KEYPAIR>])
+    .rpc();
+  ```
+- **Automate** with a script for batch creation (recommended for presale wallets).
+- **Verify** vesting accounts on-chain (explorer, Anchor client).
 
-### Option 1: Using Metaplex Umi SDK (Recommended)
-
-This is the modern, recommended approach using Metaplex's newer Umi framework.
-
-**Prerequisites:**
-
-```sh
-# Install required dependencies
-npm install @metaplex-foundation/umi @metaplex-foundation/umi-bundle-defaults @metaplex-foundation/mpl-token-metadata @metaplex-foundation/umi-uploader-irys
-```
-
-**Create a script called `set-token-metadata.js` (or `.ts` if using TypeScript):**
-
-```javascript
-import { createUmi } from '@metaplex-foundation/umi-bundle-defaults'
-import { createFungible, mplTokenMetadata } from '@metaplex-foundation/mpl-token-metadata'
-import { irysUploader } from '@metaplex-foundation/umi-uploader-irys'
-import { keypairIdentity, percentAmount, createGenericFile } from '@metaplex-foundation/umi'
-import fs from 'fs'
-
-async function createTokenMetadata() {
-  // Initialize Umi with your RPC provider (can use Metaplex Aura for higher rate limits)
-  const umi = createUmi('https://api.devnet.solana.com').use(mplTokenMetadata()).use(irysUploader())
-
-  // Load your keypair
-  const keypairFile = fs.readFileSync('/path/to/admin.json', 'utf8')
-  const secretKey = new Uint8Array(JSON.parse(keypairFile))
-  const signer = umi.eddsa.createKeypairFromSecretKey(secretKey)
-  umi.use(keypairIdentity(signer))
-
-  // Read token image and prepare for upload
-  const imageFile = fs.readFileSync('/path/to/logo.png')
-  const umiImage = createGenericFile(imageFile, 'team-logo.png', {
-    tags: [{ name: 'Content-Type', value: 'image/png' }]
-  })
-
-  // Upload image to Arweave/IPFS via Irys
-  console.log('Uploading image...')
-  const imageUri = await umi.uploader.upload([umiImage])
-  console.log('Image uploaded:', imageUri[0])
-
-  // Create and upload metadata JSON
-  const metadata = {
-    name: 'Team556 Coin',
-    symbol: 'TEAM',
-    description:
-      'A secure Solana token designed for the firearms industry, offering lower fees, faster settlements, and enhanced privacy.',
-    image: imageUri[0],
-    external_url: 'https://www.team556.com/',
-    attributes: [
-      {
-        trait_type: 'Total Supply',
-        value: '1,000,000,000'
-      },
-      {
-        trait_type: 'Blockchain',
-        value: 'Solana'
-      }
-    ]
-  }
-
-  // Upload metadata to Arweave/IPFS
-  console.log('Uploading metadata...')
-  const metadataUri = await umi.uploader.uploadJson(metadata)
-  console.log('Metadata uploaded:', metadataUri)
-
-  // Now you can create your token with this metadata
-  // For an existing token, you would use the updateMetadata function instead
-  console.log('Setting metadata for token mint:', process.env.TEAM_MINT)
-
-  // Return the metadata URI for reference
-  return metadataUri
-}
-
-createTokenMetadata()
-  .then(uri => console.log('Process complete. Metadata URI:', uri))
-  .catch(error => console.error('Error:', error))
-```
-
-**Run the script:**
+**Detailed verification steps:**
 
 ```sh
-node set-token-metadata.js
-```
+# Using Anchor client to verify vesting account state
+await program.account.vestingAccount.fetch(vestingAccountPubkey);
+// Check the returned data has the correct:
+// - beneficiary
+// - total amount
+// - claimed amount (should be 0 initially)
+// - vesting schedule (milestones with correct timestamps and amounts)
 
-### Option 2: Using Metaplex JS SDK (Alternative)
-
-If you prefer a slightly simpler approach using the older Metaplex JS SDK:
-
-**Prerequisites:**
-
-```sh
-npm install @metaplex-foundation/js @solana/web3.js
-```
-
-**Create a script called `set-metadata-js.js`:**
-
-```javascript
-import { Metaplex, keypairIdentity } from '@metaplex-foundation/js'
-import { Connection, Keypair, PublicKey } from '@solana/web3.js'
-import fs from 'fs'
-
-async function setTokenMetadata() {
-  // Connect to Solana
-  const connection = new Connection('https://api.devnet.solana.com', 'confirmed')
-
-  // Load your keypair
-  const keypairFile = fs.readFileSync('/path/to/admin.json', 'utf8')
-  const secretKey = new Uint8Array(JSON.parse(keypairFile))
-  const keypair = Keypair.fromSecretKey(secretKey)
-
-  // Initialize Metaplex
-  const metaplex = Metaplex.make(connection).use(keypairIdentity(keypair))
-
-  // Your token mint address
-  const mintAddress = new PublicKey(process.env.TEAM_MINT || 'YOUR_MINT_ADDRESS')
-
-  // Upload image (bundled in SDK)
-  const imageBuffer = fs.readFileSync('/path/to/logo.png')
-  const imageMetadata = await metaplex.nfts().uploadMetadataAsset({ file: imageBuffer })
-  console.log('Image uploaded:', imageMetadata.uri)
-
-  // Create and upload metadata
-  const { uri } = await metaplex.nfts().uploadMetadata({
-    name: 'Team556 Coin',
-    symbol: 'TEAM',
-    description: 'A secure Solana token designed for the firearms industry.',
-    image: imageMetadata.uri,
-    external_url: 'https://www.team556.com/',
-    attributes: [
-      {
-        trait_type: 'Total Supply',
-        value: '1,000,000,000'
-      }
-    ]
-  })
-  console.log('Metadata uploaded:', uri)
-
-  // Create metadata for the token
-  const { response } = await metaplex.nfts().createSft({
-    uri,
-    name: 'Team556',
-    symbol: 'TEAM',
-    sellerFeeBasisPoints: 0, // No royalties
-    isCollection: false,
-    mintAddress: mintAddress
-  })
-
-  console.log('Metadata transaction:', response.signature)
-  console.log('View on explorer:', `https://explorer.solana.com/tx/${response.signature}?cluster=devnet`)
-}
-
-setTokenMetadata()
-  .then(() => console.log('Token metadata created successfully'))
-  .catch(error => console.error('Error:', error))
-```
-
-### Option 3: Using Solana Token Extensions (Newer Approach)
-
-For new tokens, you can also use the Token-2022 program with the metadata extension. This is different from Metaplex's metadata and is integrated directly with the token.
-
-```sh
-# Create a token with metadata extension
-spl-token create-token --program-id TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb --enable-metadata --decimals 9
-
-# Initialize the metadata
-spl-token initialize-metadata <TOKEN_MINT_ADDRESS> "Team556" "TEAM" "https://example.com/team556.json"
-```
-
-### Verifying Metadata
-
-After setting up metadata using any of these methods, you can verify it:
-
-For Metaplex metadata:
-
-```sh
 # Using Solana Explorer
-# Visit https://explorer.solana.com/address/<MINT_ADDRESS>?cluster=devnet
-# Look for the "Metadata" tab
+# Visit https://explorer.solana.com/address/<VESTING_ACCOUNT_PUBKEY>?cluster=devnet
+# Should show account data owned by your program
 
-# Or fetch programmatically
-node -e "
-const { Connection, PublicKey } = require('@solana/web3.js');
-const { Metaplex } = require('@metaplex-foundation/js');
-async function getMetadata() {
-  const connection = new Connection('https://api.devnet.solana.com');
-  const metaplex = Metaplex.make(connection);
-  const mint = new PublicKey('YOUR_MINT_ADDRESS');
-  const nft = await metaplex.nfts().findByMint({ mintAddress: mint });
-  console.log(nft);
-}
-getMetadata();
-"
+# Programmatically check multiple accounts (example script)
+const vestingAccounts = await program.account.vestingAccount.all();
+console.log(`Found ${vestingAccounts.length} vesting accounts`);
+vestingAccounts.forEach(acct => {
+  console.log(`Beneficiary: ${acct.account.beneficiary.toBase58()}`);
+  console.log(`Total Amount: ${acct.account.totalAmount}`);
+  console.log(`Claimed Amount: ${acct.account.claimedAmount}`);
+  console.log(`Schedule: `, acct.account.schedule);
+});
 ```
 
-For Token-2022 metadata:
-
-```sh
-spl-token display-metadata <TOKEN_MINT_ADDRESS>
-```
-
----
-
-## 7. DEX Liquidity & LP Token Burning
+## 8. DEX Liquidity & LP Token Burning
 
 - **Add liquidity to Raydium using the CLI**
 
@@ -678,64 +614,6 @@ spl-token balance <LP_TOKEN_MINT> --owner <YOUR_PUBKEY>
 # Should return 0
 ```
 
----
-
-## 8. Vesting Account Initialization
-
-- **Use the Anchor client or CLI** to call `initialize_vesting` for each vesting wallet.
-- **Schedules:**
-  - **Dev (2 wallets, 25M each):** 5% at 2w, 15% at 24w, 30% at 30w, 50% at 36w
-  - **Marketing (1 wallet, 100M):** 10% at 2w, 15% at 6w, 25% at 10w, 50% at 14w
-  - **Presale 1 (172 wallets, 1M each):** 50% at 4w, 50% at 8w
-  - **Presale 2 (100 wallets, 500k each):** 100% at 12w
-- **Example TypeScript call:**
-  ```ts
-  await program.methods
-    .initializeVesting(walletType, totalAmount, [
-      { releaseTime: <UNIX_TIMESTAMP>, amount: <AMOUNT> },
-      // ...
-    ])
-    .accounts({
-      vestingAccount: <VESTING_ACCOUNT_PUBKEY>,
-      admin: <ADMIN_PUBKEY>,
-      beneficiary: <BENEFICIARY_PUBKEY>,
-      mint: <TEAM_MINT_PUBKEY>,
-      systemProgram: web3.SystemProgram.programId,
-    })
-    .signers([<ADMIN_KEYPAIR>])
-    .rpc();
-  ```
-- **Automate** with a script for batch creation (recommended for presale wallets).
-- **Verify** vesting accounts on-chain (explorer, Anchor client).
-
-**Detailed verification steps:**
-
-```sh
-# Using Anchor client to verify vesting account state
-await program.account.vestingAccount.fetch(vestingAccountPubkey);
-// Check the returned data has the correct:
-// - beneficiary
-// - total amount
-// - claimed amount (should be 0 initially)
-// - vesting schedule (milestones with correct timestamps and amounts)
-
-# Using Solana Explorer
-# Visit https://explorer.solana.com/address/<VESTING_ACCOUNT_PUBKEY>?cluster=devnet
-# Should show account data owned by your program
-
-# Programmatically check multiple accounts (example script)
-const vestingAccounts = await program.account.vestingAccount.all();
-console.log(`Found ${vestingAccounts.length} vesting accounts`);
-vestingAccounts.forEach(acct => {
-  console.log(`Beneficiary: ${acct.account.beneficiary.toBase58()}`);
-  console.log(`Total Amount: ${acct.account.totalAmount}`);
-  console.log(`Claimed Amount: ${acct.account.claimedAmount}`);
-  console.log(`Schedule: `, acct.account.schedule);
-});
-```
-
----
-
 ## 9. Claiming Unlocked Tokens
 
 - **Beneficiaries** call `claim_unlocked` to transfer unlocked tokens to their wallet.
@@ -779,3 +657,34 @@ solana transaction-history <BENEFICIARY_PUBKEY> | grep -i <PROGRAM_ID>
 # Verify no more tokens can be claimed if not yet unlocked
 # (Try claiming again and confirm it fails with the expected error)
 ```
+
+## 10. Finalizing Token Setup
+
+After completing all necessary token operations (setup, minting, distribution, vesting, DEX liquidity), you should disable minting to ensure the total supply remains fixed.
+
+- **Disable minting** (enforce fixed supply):
+
+  ```sh
+  # Ensure you are using the mint authority keypair
+  solana address # Should match the mint authority
+
+  spl-token authorize <TEAM_MINT> mint --disable
+  ```
+
+  > **Note:**
+  >
+  > - This should be done as the final step after all token operations are complete
+  > - You must sign with the current mint authority. If you get an `OwnerMismatch` error, verify your keypair configuration with `solana address`
+  > - This action is irreversible - once you disable minting, you cannot add more tokens or add metadata through standard methods
+  > - Keep the mint active if you need to perform more token operations, but always disable it before going to production
+
+- **Verify mint is disabled:**
+
+  ```sh
+  # Check the mint account information
+  spl-token display <TEAM_MINT>
+
+  # Confirm "Mint authority: (not set)" in the output
+  ```
+
+This completes the token setup and ensures that no additional tokens can be minted in the future.

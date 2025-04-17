@@ -33,12 +33,12 @@ async function setTokenMetadata() {
     console.log("Using keypair with public key:", keypair.publicKey.toString());
 
     // Load metadata
-    console.log("Loading metadata from fakeseals-metadata.json...");
-    const metadata = JSON.parse(fs.readFileSync('./fakeseals-metadata.json', 'utf8'));
+    console.log("Loading metadata from twofake-metadata.json...");
+    const metadata = JSON.parse(fs.readFileSync('./twofake-metadata.json', 'utf8'));
     console.log("Metadata loaded:", metadata);
 
     // Token mint address
-    const mintAddress = new PublicKey('3CPWoCJvtaSG4QhYHgzEFShzwLNnr6fh3PQURQF29ujs');
+    const mintAddress = new PublicKey('BomWBaPd9hm58Qgyb3uBube7uUrXmPs9D9ApkVRw2gyu');
 
     // Upload metadata to Arweave using Umi
     console.log("Uploading metadata to Arweave...");
