@@ -33,6 +33,12 @@ This comprehensive guide covers every step required to deploy, configure, secure
     - [7. Verifying Program Upgrades](#7-verifying-program-upgrades)
   - [6. SPL Token Creation \& Configuration](#6-spl-token-creation--configuration)
   - [7. Vesting Account Initialization](#7-vesting-account-initialization)
+    - [Testing with CLI Commands](#testing-with-cli-commands)
+      - [Using Anchor CLI Directly](#using-anchor-cli-directly)
+      - [Using a Shell Script for Multiple Wallets](#using-a-shell-script-for-multiple-wallets)
+      - [Using Solana CLI for Verification](#using-solana-cli-for-verification)
+    - [Bulk Testing with CSV Input](#bulk-testing-with-csv-input)
+    - [Verification Commands](#verification-commands)
   - [8. DEX Liquidity \& LP Token Burning](#8-dex-liquidity--lp-token-burning)
   - [9. Claiming Unlocked Tokens](#9-claiming-unlocked-tokens)
   - [10. Finalizing Token Setup](#10-finalizing-token-setup)
@@ -491,30 +497,380 @@ For critical upgrades, conduct a full suite of tests against the on-chain progra
 - **Automate** with a script for batch creation (recommended for presale wallets).
 - **Verify** vesting accounts on-chain (explorer, Anchor client).
 
+### Testing with CLI Commands
+
+For testing purposes with a small number of wallets, you can use the following CLI commands:
+
+#### Using Anchor CLI Directly
+
+Anchor CLI provides a direct way to interact with your deployed program. First, ensure your `Anchor.toml` is properly configured with your deployed program ID and provider settings.
+
+1. **Create a simple vesting initialization test instruction file** named `vesting-init.json`:
+
+```json
+{
+  "walletType": "dev",
+  "totalAmount": "25000000000000000",
+  "schedule": [
+    {
+      "releaseTime": "1718035200",
+      "amount": "1250000000000000"
+    },
+    {
+      "releaseTime": "1750204800",
+      "amount": "3750000000000000"
+    },
+    {
+      "releaseTime": "1758153600",
+      "amount": "7500000000000000"
+    },
+    {
+      "releaseTime": "1765892800",
+      "amount": "12500000000000000"
+    }
+  ]
+}
+```
+
+2. **Execute the initialize_vesting instruction** using Anchor CLI:
+
+```sh
+# Generate a new keypair for the vesting account
+solana-keygen new -o vesting_account.json --no-bip39-passphrase
+
+# Execute the initialize_vesting instruction with Anchor CLI
+anchor call \
+  --program-id Dh1XbaChDA7daGUncgRgDHFRDjGqd953PhxcHQvU8Qrc \
+  --provider.cluster mainnet \
+  --provider.wallet mainnet-test-wallets/treasury.json \
+  --filepath vesting-init.json \
+  initialize_vesting '{ "vestingAccount": "$(solana-keygen pubkey vesting_account.json)", "admin": "Azo57NjfCLHjfztDkDmrDLNN4CxLByVa8QSBqJEZUXDK", "beneficiary": "EEdBK57zM4a44cGVr714hgLaVYwZNvTfsANSMkXG8GUj", "mint": "BomWBaPd9hm58Qgyb3uBube7uUrXmPs9D9ApkVRw2gyu", "systemProgram": "11111111111111111111111111111111" }' \
+  --signer vesting_account.json
+```
+
+3. **Save the vesting account address for future reference**:
+
+```sh
+echo "Dev Vesting Account: $(solana-keygen pubkey vesting_account.json)" >> vesting-accounts.txt
+```
+
+#### Using a Shell Script for Multiple Wallets
+
+For initializing vesting for multiple wallets, create a shell script:
+
+1. **Create a shell script** named `initialize-vesting.sh`:
+
+```bash
+#!/bin/bash
+
+# Program ID and token mint
+PROGRAM_ID="Dh1XbaChDA7daGUncgRgDHFRDjGqd953PhxcHQvU8Qrc"
+TEAM_MINT="BomWBaPd9hm58Qgyb3uBube7uUrXmPs9D9ApkVRw2gyu"
+ADMIN_WALLET="mainnet-test-wallets/treasury.json"
+ADMIN_PUBKEY="Azo57NjfCLHjfztDkDmrDLNN4CxLByVa8QSBqJEZUXDK"
+
+# Get current timestamp
+NOW=$(date +%s)
+TWO_WEEKS=$((NOW + 14 * 24 * 60 * 60))
+TWENTY_FOUR_WEEKS=$((NOW + 24 * 7 * 24 * 60 * 60))
+THIRTY_WEEKS=$((NOW + 30 * 7 * 24 * 60 * 60))
+THIRTY_SIX_WEEKS=$((NOW + 36 * 7 * 24 * 60 * 60))
+
+# Dev wallets
+DEV_WALLETS=(
+  "EEdBK57zM4a44cGVr714hgLaVYwZNvTfsANSMkXG8GUj"
+  "HmuxzkLkA76xy5E9SjoqeS2p2NtgR3p74dZwRcDopPYq"
+)
+
+# Amounts (25M tokens with 9 decimals)
+TOTAL_AMOUNT="25000000000000000"
+FIRST_AMOUNT=$((TOTAL_AMOUNT / 20))    # 5%
+SECOND_AMOUNT=$((TOTAL_AMOUNT * 3 / 20)) # 15%
+THIRD_AMOUNT=$((TOTAL_AMOUNT * 3 / 10))  # 30%
+FOURTH_AMOUNT=$((TOTAL_AMOUNT / 2))    # 50%
+
+# Process each dev wallet
+for WALLET in "${DEV_WALLETS[@]}"; do
+  echo "Initializing vesting for $WALLET..."
+
+  # Create vesting account keypair
+  VESTING_KEYPAIR="vesting_${WALLET:0:8}.json"
+  solana-keygen new -o "$VESTING_KEYPAIR" --no-bip39-passphrase
+  VESTING_PUBKEY=$(solana-keygen pubkey "$VESTING_KEYPAIR")
+
+  # Create instruction file
+  cat > "vesting_${WALLET:0:8}.json" << EOF
+{
+  "walletType": "dev",
+  "totalAmount": "$TOTAL_AMOUNT",
+  "schedule": [
+    {
+      "releaseTime": "$TWO_WEEKS",
+      "amount": "$FIRST_AMOUNT"
+    },
+    {
+      "releaseTime": "$TWENTY_FOUR_WEEKS",
+      "amount": "$SECOND_AMOUNT"
+    },
+    {
+      "releaseTime": "$THIRTY_WEEKS",
+      "amount": "$THIRD_AMOUNT"
+    },
+    {
+      "releaseTime": "$THIRTY_SIX_WEEKS",
+      "amount": "$FOURTH_AMOUNT"
+    }
+  ]
+}
+EOF
+
+  # Execute initialize_vesting instruction
+  echo "Executing initialize_vesting for $WALLET..."
+
+  ARGS='{
+    "vestingAccount": "'$VESTING_PUBKEY'",
+    "admin": "'$ADMIN_PUBKEY'",
+    "beneficiary": "'$WALLET'",
+    "mint": "'$TEAM_MINT'",
+    "systemProgram": "11111111111111111111111111111111"
+  }'
+
+  anchor call \
+    --program-id "$PROGRAM_ID" \
+    --provider.cluster mainnet \
+    --provider.wallet "$ADMIN_WALLET" \
+    --filepath "vesting_${WALLET:0:8}.json" \
+    initialize_vesting "$ARGS" \
+    --signer "$VESTING_KEYPAIR"
+
+  # Save vesting account info
+  echo "$WALLET: $VESTING_PUBKEY" >> vesting-accounts.txt
+
+  echo "Vesting initialized for $WALLET at account $VESTING_PUBKEY"
+  echo "-------------------"
+done
+
+echo "All vesting accounts initialized. Check vesting-accounts.txt for details."
+```
+
+2. **Make the script executable and run it**:
+
+```sh
+chmod +x initialize-vesting.sh
+./initialize-vesting.sh
+```
+
+#### Using Solana CLI for Verification
+
+After initializing vesting accounts, verify they were set up correctly using Solana CLI:
+
+1. **Get vesting account data** (you'll need to know the account's data layout):
+
+```sh
+# Get the raw account data
+solana account <VESTING_ACCOUNT_ADDRESS>
+
+# Use Anchor CLI to decode the account data
+anchor account <VESTING_ACCOUNT_ADDRESS> --provider.cluster mainnet
+```
+
+2. **Check program-owned accounts** to see all vesting accounts:
+
+```sh
+solana program show --programs --output json Dh1XbaChDA7daGUncgRgDHFRDjGqd953PhxcHQvU8Qrc | jq '.accounts'
+```
+
+3. **Monitor transactions** on the vesting account:
+
+```sh
+solana account --output json <VESTING_ACCOUNT_ADDRESS> | jq '.lamports'
+```
+
+### Bulk Testing with CSV Input
+
+For larger scale testing with multiple wallets, you can process a CSV file:
+
+1. **Create a CSV file** named `vesting-wallets.csv`:
+
+```
+type,wallet,amount
+dev,EEdBK57zM4a44cGVr714hgLaVYwZNvTfsANSMkXG8GUj,25000000
+dev,HmuxzkLkA76xy5E9SjoqeS2p2NtgR3p74dZwRcDopPYq,25000000
+marketing,FCpvY7NSVpsbNMTeSiiC89UYM6gLLxNJrqercbVTs8zx,100000000
+```
+
+2. **Create a script to process CSV** named `process-vesting-csv.sh`:
+
+```bash
+#!/bin/bash
+
+# Configuration
+PROGRAM_ID="Dh1XbaChDA7daGUncgRgDHFRDjGqd953PhxcHQvU8Qrc"
+TEAM_MINT="BomWBaPd9hm58Qgyb3uBube7uUrXmPs9D9ApkVRw2gyu"
+ADMIN_WALLET="mainnet-test-wallets/treasury.json"
+ADMIN_PUBKEY="Azo57NjfCLHjfztDkDmrDLNN4CxLByVa8QSBqJEZUXDK"
+CSV_FILE="vesting-wallets.csv"
+DECIMALS=9
+
+# Get current timestamp
+NOW=$(date +%s)
+
+# Read CSV file and skip header
+tail -n +2 "$CSV_FILE" | while IFS=, read -r TYPE WALLET AMOUNT; do
+  echo "Processing $TYPE wallet: $WALLET with amount: $AMOUNT"
+
+  # Convert amount to base units (with 9 decimals)
+  BASE_AMOUNT=$((AMOUNT * 10**DECIMALS))
+
+  # Generate vesting keypair
+  VESTING_KEYPAIR="vesting_${WALLET:0:8}.json"
+  solana-keygen new -o "$VESTING_KEYPAIR" --no-bip39-passphrase
+  VESTING_PUBKEY=$(solana-keygen pubkey "$VESTING_KEYPAIR")
+
+  # Set vesting schedule based on wallet type
+  if [ "$TYPE" == "dev" ]; then
+    # Dev schedule: 5% at 2w, 15% at 24w, 30% at 30w, 50% at 36w
+    TWO_WEEKS=$((NOW + 14 * 24 * 60 * 60))
+    TWENTY_FOUR_WEEKS=$((NOW + 24 * 7 * 24 * 60 * 60))
+    THIRTY_WEEKS=$((NOW + 30 * 7 * 24 * 60 * 60))
+    THIRTY_SIX_WEEKS=$((NOW + 36 * 7 * 24 * 60 * 60))
+
+    FIRST_AMOUNT=$((BASE_AMOUNT / 20))       # 5%
+    SECOND_AMOUNT=$((BASE_AMOUNT * 3 / 20))  # 15%
+    THIRD_AMOUNT=$((BASE_AMOUNT * 3 / 10))   # 30%
+    FOURTH_AMOUNT=$((BASE_AMOUNT / 2))       # 50%
+
+    # Create instruction file
+    cat > "vesting_${WALLET:0:8}.json" << EOF
+{
+  "walletType": "dev",
+  "totalAmount": "$BASE_AMOUNT",
+  "schedule": [
+    {
+      "releaseTime": "$TWO_WEEKS",
+      "amount": "$FIRST_AMOUNT"
+    },
+    {
+      "releaseTime": "$TWENTY_FOUR_WEEKS",
+      "amount": "$SECOND_AMOUNT"
+    },
+    {
+      "releaseTime": "$THIRTY_WEEKS",
+      "amount": "$THIRD_AMOUNT"
+    },
+    {
+      "releaseTime": "$THIRTY_SIX_WEEKS",
+      "amount": "$FOURTH_AMOUNT"
+    }
+  ]
+}
+EOF
+
+  elif [ "$TYPE" == "marketing" ]; then
+    # Marketing schedule: 10% at 2w, 15% at 6w, 25% at 10w, 50% at 14w
+    TWO_WEEKS=$((NOW + 14 * 24 * 60 * 60))
+    SIX_WEEKS=$((NOW + 6 * 7 * 24 * 60 * 60))
+    TEN_WEEKS=$((NOW + 10 * 7 * 24 * 60 * 60))
+    FOURTEEN_WEEKS=$((NOW + 14 * 7 * 24 * 60 * 60))
+
+    FIRST_AMOUNT=$((BASE_AMOUNT / 10))      # 10%
+    SECOND_AMOUNT=$((BASE_AMOUNT * 3 / 20)) # 15%
+    THIRD_AMOUNT=$((BASE_AMOUNT / 4))       # 25%
+    FOURTH_AMOUNT=$((BASE_AMOUNT / 2))      # 50%
+
+    # Create instruction file
+    cat > "vesting_${WALLET:0:8}.json" << EOF
+{
+  "walletType": "marketing",
+  "totalAmount": "$BASE_AMOUNT",
+  "schedule": [
+    {
+      "releaseTime": "$TWO_WEEKS",
+      "amount": "$FIRST_AMOUNT"
+    },
+    {
+      "releaseTime": "$SIX_WEEKS",
+      "amount": "$SECOND_AMOUNT"
+    },
+    {
+      "releaseTime": "$TEN_WEEKS",
+      "amount": "$THIRD_AMOUNT"
+    },
+    {
+      "releaseTime": "$FOURTEEN_WEEKS",
+      "amount": "$FOURTH_AMOUNT"
+    }
+  ]
+}
+EOF
+  fi
+
+  # Execute initialize_vesting instruction
+  echo "Executing initialize_vesting for $WALLET..."
+
+  ARGS='{
+    "vestingAccount": "'$VESTING_PUBKEY'",
+    "admin": "'$ADMIN_PUBKEY'",
+    "beneficiary": "'$WALLET'",
+    "mint": "'$TEAM_MINT'",
+    "systemProgram": "11111111111111111111111111111111"
+  }'
+
+  anchor call \
+    --program-id "$PROGRAM_ID" \
+    --provider.cluster mainnet \
+    --provider.wallet "$ADMIN_WALLET" \
+    --filepath "vesting_${WALLET:0:8}.json" \
+    initialize_vesting "$ARGS" \
+    --signer "$VESTING_KEYPAIR"
+
+  # Save vesting account info
+  echo "$TYPE,$WALLET,$AMOUNT,$VESTING_PUBKEY" >> vesting-accounts-results.csv
+
+  echo "Vesting initialized for $WALLET at account $VESTING_PUBKEY"
+  echo "-------------------"
+done
+
+echo "All vesting accounts initialized. Check vesting-accounts-results.csv for details."
+```
+
+3. **Make the script executable and run it**:
+
+```sh
+chmod +x process-vesting-csv.sh
+./process-vesting-csv.sh
+```
+
+### Verification Commands
+
+After initializing vesting accounts, verify they were set up correctly:
+
+```sh
+# List all vesting accounts saved during initialization
+cat vesting-accounts.txt
+
+# Get account data for a specific vesting account
+anchor account <VESTING_ACCOUNT_ADDRESS> --provider.cluster mainnet
+
+# Check for recent transactions involving your program
+solana transaction-history --limit 10 Azo57NjfCLHjfztDkDmrDLNN4CxLByVa8QSBqJEZUXDK
+
+# Verify account ownership
+solana account <VESTING_ACCOUNT_ADDRESS> --output json | jq '.owner'
+```
+
 **Detailed verification steps:**
 
 ```sh
-# Using Anchor client to verify vesting account state
-await program.account.vestingAccount.fetch(vestingAccountPubkey);
-// Check the returned data has the correct:
-// - beneficiary
-// - total amount
-// - claimed amount (should be 0 initially)
-// - vesting schedule (milestones with correct timestamps and amounts)
-
 # Using Solana Explorer
-# Visit https://explorer.solana.com/address/<VESTING_ACCOUNT_PUBKEY>?cluster=devnet
+# Visit https://explorer.solana.com/address/<VESTING_ACCOUNT_PUBKEY>?cluster=mainnet
 # Should show account data owned by your program
 
-# Programmatically check multiple accounts (example script)
-const vestingAccounts = await program.account.vestingAccount.all();
-console.log(`Found ${vestingAccounts.length} vesting accounts`);
-vestingAccounts.forEach(acct => {
-  console.log(`Beneficiary: ${acct.account.beneficiary.toBase58()}`);
-  console.log(`Total Amount: ${acct.account.totalAmount}`);
-  console.log(`Claimed Amount: ${acct.account.claimedAmount}`);
-  console.log(`Schedule: `, acct.account.schedule);
-});
+# Check program-owned accounts
+solana program show --programs --output json Dh1XbaChDA7daGUncgRgDHFRDjGqd953PhxcHQvU8Qrc
+
+# Check vesting account details
+solana account <VESTING_ACCOUNT_PUBKEY>
 ```
 
 ## 8. DEX Liquidity & LP Token Burning
