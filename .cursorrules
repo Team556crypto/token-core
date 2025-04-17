@@ -1,0 +1,100 @@
+# Instructions
+
+During your interaction with the user, if you find anything reusable in this project (e.g. version of a library, model name), especially about a fix to a mistake you made or a correction you received, you should take note in the `Lessons` section in the `.cursorrules` file so you will not make the same mistake again.
+
+You should also use the `.cursorrules` file as a Scratchpad to organize your thoughts. Especially when you receive a new task, you should first review the content of the Scratchpad, clear old different task if necessary, first explain the task, and plan the steps you need to take to complete the task. You can use todo markers to indicate the progress, e.g.
+[X] Task 1
+[ ] Task 2
+
+Also update the progress of the task in the Scratchpad when you finish a subtask.
+Especially when you finished a milestone, it will help to improve your depth of task accomplishment to use the Scratchpad to reflect and plan.
+The goal is to help you maintain a big picture as well as the progress of the task. Always refer to the Scratchpad when you plan the next step.
+
+# Lessons
+
+## User Specified Lessons
+
+## Cursor learned
+
+# Scratchpad
+
+## Task Explanation
+
+**Goal:**  
+Implement a "team" Anchor program for Solana, but only include logic that cannot be accomplished with the Solana CLI. The implementation must be in line with the whitepaper, and a detailed `DEPLOYMENT.md` must be created to describe how to deploy the project.
+
+**Constraints:**
+
+- Only add on-chain logic that cannot be done with the Solana CLI.
+- The program must be complete and functional.
+- The whitepaper's requirements must be respected.
+- Provide a detailed deployment guide.
+
+---
+
+## Current State
+
+- The current Anchor program (`team`) is a basic hello world that initializes an account with a `u64` value.
+- No SPL token logic, vesting, or compliance logic is present.
+- The whitepaper describes a token with vesting, locked wallets, and compliance requirements.
+- No custom token minting, vesting, or compliance logic is implemented in the program.
+- No README or deployment documentation exists.
+
+---
+
+## Whitepaper Requirements (Relevant to On-Chain Logic)
+
+- **Tokenomics:** 1B supply, no inflation, vesting for presale/dev/marketing wallets.
+- **Vesting:** Automated, enforced by smart contract (not CLI).
+- **Locked wallets:** Dev/marketing wallets are locked and vest over time.
+- **No additional minting:** Supply is fixed.
+- **Presale:** Distribution and vesting for presale participants.
+- **Compliance:** KYC for merchants (but this is likely off-chain).
+- **No airdrop, burn, or advanced features required for MVP.**
+
+---
+
+## What Solana CLI Can Do
+
+- Mint SPL tokens.
+- Transfer tokens.
+- Create token accounts.
+- Burn tokens.
+- Freeze accounts.
+
+---
+
+## What Needs On-Chain Logic
+
+- **Automated vesting:** Enforce that certain wallets cannot transfer tokens until vesting milestones are reached.
+- **Token distribution logic:** (if not handled by CLI).
+- **Enforcement of no additional minting:** (SPL token can be set to non-mintable after creation).
+- **Compliance/KYC:** Likely off-chain, but could be referenced on-chain.
+
+---
+
+## Plan
+
+1. **[X] Review current codebase and whitepaper for requirements.**
+2. **[X] Identify what must be implemented on-chain (vesting, token lock).**
+3. **[ ] Implement a minimal Anchor program that:**
+   - Enforces vesting/locking for dev/marketing/presale wallets.
+   - (Optional) Handles initial token distribution if not done by CLI.
+4. **[ ] Write a detailed `DEPLOYMENT.md` covering:**
+   - How to deploy the Anchor program.
+   - How to create and configure the SPL token (using CLI).
+   - How to set up vesting/locked wallets.
+   - How to interact with the program for vesting/unlocking.
+5. **[ ] Update `.cursorrules` with lessons learned.**
+
+---
+
+## Next Step
+
+**Implement the minimal Anchor program for vesting/locked wallets.**
+
+---
+
+Would you like the vesting logic to be generic (for any SPL token) or specific to the $TEAM token mint?  
+Should the program only enforce vesting for a fixed set of wallets, or should it be configurable?  
+(If you have a preference, let me know; otherwise, I will proceed with a fixed set for MVP as per the whitepaper.)

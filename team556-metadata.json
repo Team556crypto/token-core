@@ -1,0 +1,44 @@
+{
+  "name": "Team556 Coin",
+  "symbol": "TEAM",
+  "description": "A secure Solana token designed for the firearms industry, offering lower fees, faster settlements, and enhanced privacy.",
+  "image": "https://mj79u8lfav.ufs.sh/f/8MBjWI2gDtAymnNL5lficxseR9FHPl2gQGMXzAfVKCpqJ7wD",
+  "external_url": "https://www.team556.com/",
+  "extensions": {
+    "website": "https://www.team556.com/",
+    "x": "https://x.com/team556_coin",
+    "discord": "https://discord.gg/6FeJsXQufD",
+    "github": "https://github.com/Team556crypto/team556-token-core",
+    "facebook": "https://www.facebook.com/profile.php?id=61573136584832"
+  },
+  "attributes": [
+    {
+      "trait_type": "Total Supply",
+      "value": "1,000,000,000"
+    },
+    {
+      "trait_type": "Public Circulation",
+      "value": "70%"
+    },
+    {
+      "trait_type": "Primary Presale",
+      "value": "17.2%"
+    },
+    {
+      "trait_type": "Secondary Presale",
+      "value": "5%"
+    },
+    {
+      "trait_type": "Development Team",
+      "value": "5%"
+    },
+    {
+      "trait_type": "Marketing/Project Dev",
+      "value": "2.8%"
+    },
+    {
+      "trait_type": "Blockchain",
+      "value": "Solana"
+    }
+  ]
+}
