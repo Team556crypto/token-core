@@ -31,12 +31,12 @@ async function setTokenMetadata() {
       .use(keypairIdentity(keypair));
 
     // Load metadata
-    console.log("Loading metadata from fakeseals-metadata.json...");
-    const metadata = JSON.parse(fs.readFileSync('./fakeseals-metadata.json', 'utf8'));
+    console.log("Loading metadata from twofake-metadata.json...");
+    const metadata = JSON.parse(fs.readFileSync('./twofake-metadata.json', 'utf8'));
     console.log("Metadata loaded:", metadata);
 
     // Your token mint address
-    const mintAddress = new PublicKey('3CPWoCJvtaSG4QhYHgzEFShzwLNnr6fh3PQURQF29ujs');
+    const mintAddress = new PublicKey('BomWBaPd9hm58Qgyb3uBube7uUrXmPs9D9ApkVRw2gyu');
 
     // First, upload the complete metadata JSON to get a metadata URI
     console.log("Uploading complete metadata to Arweave...");

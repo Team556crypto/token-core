@@ -4,10 +4,10 @@ use std::str::FromStr;
 
 // This is your program's public key and it will update
 // automatically when you build the project.
-declare_id!("9zQ1Zf83KRmxXQFqb7nfcDXsZ4zys4RsGomrM7CfxYgd");
+declare_id!("Dh1XbaChDA7daGUncgRgDHFRDjGqd953PhxcHQvU8Qrc");
 
 // Only this wallet can initialize vesting accounts (set to the deployer or governance wallet for production)
-const ADMIN_PUBKEY: &str = env!("TREASURY_ADDRESS"); // Set at build time: export TREASURY_ADDRESS=<TREASURY_ADDRESS> before building, or use .env with Anchor
+const ADMIN_PUBKEY: &str = "Azo57NjfCLHjfztDkDmrDLNN4CxLByVa8QSBqJEZUXDK"; // Set at build time: export TREASURY_ADDRESS=<TREASURY_ADDRESS> before building, or use .env with Anchor
 
 #[program]
 mod team {
