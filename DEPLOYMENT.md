@@ -33,6 +33,10 @@ This comprehensive guide covers every step required to deploy, configure, secure
     - [7. Verifying Program Upgrades](#7-verifying-program-upgrades)
   - [6. SPL Token Creation \& Configuration](#6-spl-token-creation--configuration)
   - [7. Vesting Account Initialization](#7-vesting-account-initialization)
+    - [7.1 Prerequisites](#71-prerequisites)
+    - [7.2 Initializing Vesting Accounts Using TypeScript Client](#72-initializing-vesting-accounts-using-typescript-client)
+    - [7.3 Manual Initialization Using Anchor CLI](#73-manual-initialization-using-anchor-cli)
+    - [7.4 Fund the Vesting Token Accounts](#74-fund-the-vesting-token-accounts)
     - [Verification Commands](#verification-commands)
   - [8. DEX Liquidity \& LP Token Burning](#8-dex-liquidity--lp-token-burning)
   - [9. Claiming Unlocked Tokens](#9-claiming-unlocked-tokens)
@@ -465,6 +469,280 @@ For critical upgrades, conduct a full suite of tests against the on-chain progra
 > **TIP:** When using the commands above, replace `<TEAM_MINT>` with the actual mint address (e.g., BomWBaPd9hm58Qgyb3uBube7uUrXmPs9D9ApkVRw2gyu) unless you've exported it as an environment variable with `export TEAM_MINT=...`
 
 ## 7. Vesting Account Initialization
+
+After token creation and distribution, you must initialize vesting accounts for each wallet type (Dev, Marketing, Presale1, Presale2) to enforce vesting schedules defined in the whitepaper. **Only the admin wallet can initialize vesting accounts.**
+
+### 7.1 Prerequisites
+
+- The Anchor program is deployed
+- SPL token is created and tokens are minted
+- Token accounts are created for all beneficiary wallets
+- Admin wallet (specified in `ADMIN_PUBKEY` in the program) has SOL for transaction fees
+
+### 7.2 Initializing Vesting Accounts Using TypeScript Client
+
+The easiest way to initialize vesting accounts is using the TypeScript client. Create a script file named `init-vesting.ts` in the `scripts` directory:
+
+```typescript
+import * as anchor from '@project-serum/anchor'
+import { Program } from '@project-serum/anchor'
+import { PublicKey } from '@solana/web3.js'
+import { Token, TOKEN_PROGRAM_ID } from '@solana/spl-token'
+import { Team } from '../target/types/team'
+import dotenv from 'dotenv'
+
+dotenv.config()
+
+// Helper to convert weeks to timestamp (seconds since epoch)
+const weeksFromNow = (weeks: number): number => {
+  return Math.floor(Date.now() / 1000) + weeks * 7 * 24 * 60 * 60
+}
+
+async function main() {
+  // Configure the client
+  const provider = anchor.AnchorProvider.env()
+  anchor.setProvider(provider)
+
+  const program = anchor.workspace.Team as Program<Team>
+  const teamMint = new PublicKey(process.env.TEAM_MINT!)
+
+  // Initialize each vesting account type
+  await initializeDevVesting(program, teamMint, provider)
+  await initializeMarketingVesting(program, teamMint, provider)
+  await initializePresale1Vesting(program, teamMint, provider)
+  await initializePresale2Vesting(program, teamMint, provider)
+
+  console.log('All vesting accounts initialized successfully!')
+}
+
+async function initializeDevVesting(program: Program<Team>, mint: PublicKey, provider: anchor.AnchorProvider) {
+  // Dev wallet beneficiary
+  const devWallet = new PublicKey(process.env.DEV_WALLET!)
+  const totalAmount = new anchor.BN(50_000_000 * 10 ** 9) // 5% of total supply with 9 decimals
+
+  // Dev vesting schedule: 5% at 2w, 15% at 24w, 30% at 30w, 50% at 36w
+  const schedule = [
+    { release_time: new anchor.BN(weeksFromNow(2)), amount: new anchor.BN(totalAmount.toNumber() * 0.05) },
+    { release_time: new anchor.BN(weeksFromNow(24)), amount: new anchor.BN(totalAmount.toNumber() * 0.15) },
+    { release_time: new anchor.BN(weeksFromNow(30)), amount: new anchor.BN(totalAmount.toNumber() * 0.3) },
+    { release_time: new anchor.BN(weeksFromNow(36)), amount: new anchor.BN(totalAmount.toNumber() * 0.5) }
+  ]
+
+  // Find PDA for vesting account
+  const [vestingAccount] = await PublicKey.findProgramAddress(
+    [Buffer.from('vesting'), devWallet.toBuffer()],
+    program.programId
+  )
+
+  console.log(`Initializing Dev vesting account: ${vestingAccount.toString()}`)
+
+  // Initialize vesting account
+  await program.methods
+    .initializeVesting({ dev: {} }, totalAmount, schedule)
+    .accounts({
+      vestingAccount: vestingAccount,
+      admin: provider.wallet.publicKey,
+      beneficiary: devWallet,
+      mint: mint,
+      systemProgram: anchor.web3.SystemProgram.programId
+    })
+    .rpc()
+
+  console.log('Dev vesting initialized successfully!')
+}
+
+async function initializeMarketingVesting(program: Program<Team>, mint: PublicKey, provider: anchor.AnchorProvider) {
+  // Marketing wallet beneficiary
+  const marketingWallet = new PublicKey(process.env.MARKETING_WALLET!)
+  const totalAmount = new anchor.BN(100_000_000 * 10 ** 9) // 10% of total supply with 9 decimals
+
+  // Marketing vesting schedule: 10% at 2w, 15% at 6w, 25% at 10w, 50% at 14w
+  const schedule = [
+    { release_time: new anchor.BN(weeksFromNow(2)), amount: new anchor.BN(totalAmount.toNumber() * 0.1) },
+    { release_time: new anchor.BN(weeksFromNow(6)), amount: new anchor.BN(totalAmount.toNumber() * 0.15) },
+    { release_time: new anchor.BN(weeksFromNow(10)), amount: new anchor.BN(totalAmount.toNumber() * 0.25) },
+    { release_time: new anchor.BN(weeksFromNow(14)), amount: new anchor.BN(totalAmount.toNumber() * 0.5) }
+  ]
+
+  // Find PDA for vesting account
+  const [vestingAccount] = await PublicKey.findProgramAddress(
+    [Buffer.from('vesting'), marketingWallet.toBuffer()],
+    program.programId
+  )
+
+  console.log(`Initializing Marketing vesting account: ${vestingAccount.toString()}`)
+
+  // Initialize vesting account
+  await program.methods
+    .initializeVesting({ marketing: {} }, totalAmount, schedule)
+    .accounts({
+      vestingAccount: vestingAccount,
+      admin: provider.wallet.publicKey,
+      beneficiary: marketingWallet,
+      mint: mint,
+      systemProgram: anchor.web3.SystemProgram.programId
+    })
+    .rpc()
+
+  console.log('Marketing vesting initialized successfully!')
+}
+
+async function initializePresale1Vesting(program: Program<Team>, mint: PublicKey, provider: anchor.AnchorProvider) {
+  // Presale1 wallet beneficiary
+  const presale1Wallet = new PublicKey(process.env.PRESALE1_WALLET!)
+  const totalAmount = new anchor.BN(100_000_000 * 10 ** 9) // 10% of total supply with 9 decimals for primary presale
+
+  // Presale1 vesting schedule: 50% at 4w, 50% at 8w
+  const schedule = [
+    { release_time: new anchor.BN(weeksFromNow(4)), amount: new anchor.BN(totalAmount.toNumber() * 0.5) },
+    { release_time: new anchor.BN(weeksFromNow(8)), amount: new anchor.BN(totalAmount.toNumber() * 0.5) }
+  ]
+
+  // Find PDA for vesting account
+  const [vestingAccount] = await PublicKey.findProgramAddress(
+    [Buffer.from('vesting'), presale1Wallet.toBuffer()],
+    program.programId
+  )
+
+  console.log(`Initializing Presale1 vesting account: ${vestingAccount.toString()}`)
+
+  // Initialize vesting account
+  await program.methods
+    .initializeVesting({ presale1: {} }, totalAmount, schedule)
+    .accounts({
+      vestingAccount: vestingAccount,
+      admin: provider.wallet.publicKey,
+      beneficiary: presale1Wallet,
+      mint: mint,
+      systemProgram: anchor.web3.SystemProgram.programId
+    })
+    .rpc()
+
+  console.log('Presale1 vesting initialized successfully!')
+}
+
+async function initializePresale2Vesting(program: Program<Team>, mint: PublicKey, provider: anchor.AnchorProvider) {
+  // Presale2 wallet beneficiary
+  const presale2Wallet = new PublicKey(process.env.PRESALE2_WALLET!)
+  const totalAmount = new anchor.BN(50_000_000 * 10 ** 9) // 5% of total supply with 9 decimals for secondary presale
+
+  // Presale2 vesting schedule: 100% at 12w
+  const schedule = [{ release_time: new anchor.BN(weeksFromNow(12)), amount: new anchor.BN(totalAmount.toNumber()) }]
+
+  // Find PDA for vesting account
+  const [vestingAccount] = await PublicKey.findProgramAddress(
+    [Buffer.from('vesting'), presale2Wallet.toBuffer()],
+    program.programId
+  )
+
+  console.log(`Initializing Presale2 vesting account: ${vestingAccount.toString()}`)
+
+  // Initialize vesting account
+  await program.methods
+    .initializeVesting({ presale2: {} }, totalAmount, schedule)
+    .accounts({
+      vestingAccount: vestingAccount,
+      admin: provider.wallet.publicKey,
+      beneficiary: presale2Wallet,
+      mint: mint,
+      systemProgram: anchor.web3.SystemProgram.programId
+    })
+    .rpc()
+
+  console.log('Presale2 vesting initialized successfully!')
+}
+
+main().catch(err => {
+  console.error(err)
+  process.exit(1)
+})
+```
+
+Save this script, then add the following environment variables to your `.env` file:
+
+```
+TEAM_MINT=your_token_mint_address
+DEV_WALLET=dev_wallet_public_key
+MARKETING_WALLET=marketing_wallet_public_key
+PRESALE1_WALLET=presale1_wallet_public_key
+PRESALE2_WALLET=presale2_wallet_public_key
+```
+
+Run the script to initialize all vesting accounts:
+
+```sh
+# Make sure you're using the admin wallet configured in the Anchor program
+solana config set --keypair /path/to/admin.json
+
+# Run the script
+ts-node scripts/init-vesting.ts
+```
+
+### 7.3 Manual Initialization Using Anchor CLI
+
+Alternatively, you can use the Anchor CLI to initialize each vesting account:
+
+```sh
+# For Dev wallet (5% of total supply)
+# 5% at 2w, 15% at 24w, 30% at 30w, 50% at 36w
+anchor run initialize-dev-vesting -- \
+  --beneficiary <DEV_WALLET_PUBKEY> \
+  --mint <TEAM_MINT> \
+  --amount 50000000000000000 \
+  --schedule '[{"release_time":<TIMESTAMP_2W>,"amount":<5%_AMOUNT>},{"release_time":<TIMESTAMP_24W>,"amount":<15%_AMOUNT>},{"release_time":<TIMESTAMP_30W>,"amount":<30%_AMOUNT>},{"release_time":<TIMESTAMP_36W>,"amount":<50%_AMOUNT>}]'
+
+# For Marketing wallet (10% of total supply)
+# 10% at 2w, 15% at 6w, 25% at 10w, 50% at 14w
+anchor run initialize-marketing-vesting -- \
+  --beneficiary <MARKETING_WALLET_PUBKEY> \
+  --mint <TEAM_MINT> \
+  --amount 100000000000000000 \
+  --schedule '[{"release_time":<TIMESTAMP_2W>,"amount":<10%_AMOUNT>},{"release_time":<TIMESTAMP_6W>,"amount":<15%_AMOUNT>},{"release_time":<TIMESTAMP_10W>,"amount":<25%_AMOUNT>},{"release_time":<TIMESTAMP_14W>,"amount":<50%_AMOUNT>}]'
+
+# For Presale1 wallet (10% of total supply)
+# 50% at 4w, 50% at 8w
+anchor run initialize-presale1-vesting -- \
+  --beneficiary <PRESALE1_WALLET_PUBKEY> \
+  --mint <TEAM_MINT> \
+  --amount 100000000000000000 \
+  --schedule '[{"release_time":<TIMESTAMP_4W>,"amount":<50%_AMOUNT>},{"release_time":<TIMESTAMP_8W>,"amount":<50%_AMOUNT>}]'
+
+# For Presale2 wallet (5% of total supply)
+# 100% at 12w
+anchor run initialize-presale2-vesting -- \
+  --beneficiary <PRESALE2_WALLET_PUBKEY> \
+  --mint <TEAM_MINT> \
+  --amount 50000000000000000 \
+  --schedule '[{"release_time":<TIMESTAMP_12W>,"amount":<FULL_AMOUNT>}]'
+```
+
+Replace placeholders with actual values:
+
+- `<DEV_WALLET_PUBKEY>`, `<MARKETING_WALLET_PUBKEY>`, etc.: Public keys of the beneficiary wallets
+- `<TEAM_MINT>`: Your token mint address
+- `<TIMESTAMP_XW>`: Unix timestamp for X weeks from now (calculate with `date -d "+X weeks" +%s`)
+- `<X%_AMOUNT>`: Corresponding amount in base units (with 9 decimals) for each percentage
+
+### 7.4 Fund the Vesting Token Accounts
+
+After initializing the vesting accounts, you need to fund the token accounts that will hold the vested tokens:
+
+1. Derive the PDA for each vesting account:
+
+   ```sh
+   solana address --keypair /path/to/admin.json -s "[\"vesting\",\"<BENEFICIARY_PUBKEY>\"]" -k <PROGRAM_ID>
+   ```
+
+2. Create token accounts for each vesting PDA:
+
+   ```sh
+   spl-token create-account <TEAM_MINT> --owner <VESTING_PDA>
+   ```
+
+3. Transfer tokens from the admin/treasury to each vesting token account:
+   ```sh
+   spl-token transfer <TEAM_MINT> <AMOUNT> <VESTING_TOKEN_ACCOUNT> --from <ADMIN_TOKEN_ACCOUNT>
+   ```
 
 ### Verification Commands
 
