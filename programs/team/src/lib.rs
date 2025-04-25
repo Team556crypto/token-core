@@ -203,67 +203,6 @@ pub mod team {
 
         Ok(())
     }
-    
-    /// Allows the admin to distribute unlocked tokens to beneficiaries automatically.
-    ///
-    /// This function enables automated distribution without requiring beneficiaries to manually claim.
-    /// Only the designated admin wallet (`ADMIN_PUBKEY`) can call this function.
-    ///
-    /// Similar to `claim_unlocked`, but can be initiated by the admin on behalf of beneficiaries.
-    ///
-    /// Args:
-    /// * `ctx`: Context containing accounts required for the admin-initiated distribution.
-    pub fn admin_distribute_unlocked(ctx: Context<AdminDistribute>) -> Result<()> {
-        // Get a mutable reference to the vesting account state.
-        let vesting = &mut ctx.accounts.vesting_account;
-        // Get the current time from the Solana clock sysvar.
-        let now = Clock::get()?.unix_timestamp as u64;
-
-        // --- Calculate Claimable Amount ---
-        // Determine the total amount unlocked based on the current time and schedule.
-        let mut unlocked_amount = 0u64;
-        for s in &vesting.schedule {
-            if now >= s.release_time {
-                // Add amount if release time is in the past or present.
-                unlocked_amount = unlocked_amount.saturating_add(s.amount);
-            }
-        }
-
-        // Calculate the amount actually claimable (unlocked minus already claimed).
-        let claimable_amount = unlocked_amount.saturating_sub(vesting.claimed_amount);
-        require!(claimable_amount > 0, VestingError::NothingToClaim);
-
-        // --- Update State ---
-        // Increase the claimed amount in the vesting account state.
-        vesting.claimed_amount = vesting.claimed_amount.saturating_add(claimable_amount);
-
-        // --- Transfer Tokens ---
-        // Prepare arguments for the token transfer CPI.
-        let cpi_accounts = Transfer {
-            from: ctx.accounts.vesting_token_account.to_account_info(),
-            to: ctx.accounts.destination_token_account.to_account_info(),
-            authority: ctx.accounts.vesting_signer.to_account_info(),
-        };
-        // Get the token program account info.
-        let cpi_program = ctx.accounts.token_program.to_account_info();
-        // Define the PDA signer seeds required for the transfer CPI.
-        let signer_seeds: &[&[&[u8]]] = &[&[
-            b"vesting",
-            vesting.authority.as_ref(),
-            &[vesting.bump],
-        ]];
-        // Execute the token transfer CPI, signed by the PDA.
-        transfer(
-            CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds),
-            claimable_amount,
-        )?;
-
-        // Log success
-        msg!("Admin distributed {} tokens to beneficiary: {}", claimable_amount, vesting.authority);
-        msg!("Remaining claimable based on current time: {}", unlocked_amount.saturating_sub(vesting.claimed_amount));
-
-        Ok(())
-    }
 }
 
 /// Defines the accounts required for the `initialize_vesting` instruction.
