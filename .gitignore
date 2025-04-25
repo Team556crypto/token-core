@@ -5,6 +5,7 @@ node_modules
 test-ledger
 .yarn
 .env
+target
 
 # Test wallets
 mainnet-test-wallets/

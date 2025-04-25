@@ -35,7 +35,6 @@ This comprehensive guide covers every step required to deploy, configure, secure
   - [7. Vesting Account Initialization](#7-vesting-account-initialization)
     - [7.1 Prerequisites](#71-prerequisites)
     - [7.2 Initializing Vesting Accounts Using TypeScript Client](#72-initializing-vesting-accounts-using-typescript-client)
-    - [7.3 Manual Initialization Using Anchor CLI](#73-manual-initialization-using-anchor-cli)
     - [7.4 Fund the Vesting Token Accounts](#74-fund-the-vesting-token-accounts)
     - [Verification Commands](#verification-commands)
   - [8. DEX Liquidity \& LP Token Burning](#8-dex-liquidity--lp-token-burning)
@@ -481,267 +480,167 @@ After token creation and distribution, you must initialize vesting accounts for 
 
 ### 7.2 Initializing Vesting Accounts Using TypeScript Client
 
-The easiest way to initialize vesting accounts is using the TypeScript client. Create a script file named `init-vesting.ts` in the `scripts` directory:
+The project includes dedicated TypeScript scripts in the `scripts/` directory to automate vesting account initialization for each allocation type. This approach is more maintainable and less error-prone than manual initialization.
 
-```typescript
-import * as anchor from '@project-serum/anchor'
-import { Program } from '@project-serum/anchor'
-import { PublicKey } from '@solana/web3.js'
-import { Token, TOKEN_PROGRAM_ID } from '@solana/spl-token'
-import { Team } from '../target/types/team'
-import dotenv from 'dotenv'
+#### Setup Prerequisites
 
-dotenv.config()
+1. **Install Dependencies:**
+   ```sh
+   npm install
+   # or
+   yarn install
+   ```
 
-// Helper to convert weeks to timestamp (seconds since epoch)
-const weeksFromNow = (weeks: number): number => {
-  return Math.floor(Date.now() / 1000) + weeks * 7 * 24 * 60 * 60
-}
+2. **Create `.env` File:**
+   Create a `.env` file in the project root directory with the following variables:
+   ```dotenv
+   # RPC URL (use Devnet for testing, Mainnet for production)
+   RPC_URL=https://api.mainnet-beta.solana.com
+   # RPC_URL=https://api.devnet.solana.com
+   # RPC_URL=http://127.0.0.1:8899  # Local validator
 
-async function main() {
-  // Configure the client
-  const provider = anchor.AnchorProvider.env()
-  anchor.setProvider(provider)
+   # Path to the admin keypair file (must match ADMIN_PUBKEY in the program)
+   ADMIN_KEYPAIR_PATH=/path/to/admin-wallet.json
 
-  const program = anchor.workspace.Team as Program<Team>
-  const teamMint = new PublicKey(process.env.TEAM_MINT!)
+   # Deployed Program ID
+   PROGRAM_ID=Dh1XbaChDA7daGUncgRgDHFRDjGqd953PhxcHQvU8Qrc
 
-  // Initialize each vesting account type
-  await initializeDevVesting(program, teamMint, provider)
-  await initializeMarketingVesting(program, teamMint, provider)
-  await initializePresale1Vesting(program, teamMint, provider)
-  await initializePresale2Vesting(program, teamMint, provider)
+   # $TEAM Token Mint Address
+   MINT_ADDRESS=BomWBaPd9hm58Qgyb3uBube7uUrXmPs9D9ApkVRw2gyu
 
-  console.log('All vesting accounts initialized successfully!')
-}
+   # Token Decimals (usually 9 for Solana SPL tokens)
+   TOKEN_DECIMALS=9
 
-async function initializeDevVesting(program: Program<Team>, mint: PublicKey, provider: anchor.AnchorProvider) {
-  // Dev wallet beneficiary
-  const devWallet = new PublicKey(process.env.DEV_WALLET!)
-  const totalAmount = new anchor.BN(50_000_000 * 10 ** 9) // 5% of total supply with 9 decimals
+   # Beneficiary Wallet Addresses
+   DEV_WALLET=DevTeamPubkeyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+   MARKETING_WALLET=MarketingPubkeyXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+   PRESALE1_WALLET=Presale1PubkeyXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+   PRESALE2_WALLET=Presale2PubkeyXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
-  // Dev vesting schedule: 5% at 2w, 15% at 24w, 30% at 30w, 50% at 36w
-  const schedule = [
-    { release_time: new anchor.BN(weeksFromNow(2)), amount: new anchor.BN(totalAmount.toNumber() * 0.05) },
-    { release_time: new anchor.BN(weeksFromNow(24)), amount: new anchor.BN(totalAmount.toNumber() * 0.15) },
-    { release_time: new anchor.BN(weeksFromNow(30)), amount: new anchor.BN(totalAmount.toNumber() * 0.3) },
-    { release_time: new anchor.BN(weeksFromNow(36)), amount: new anchor.BN(totalAmount.toNumber() * 0.5) }
-  ]
+   # Total Vesting Amounts (in UI format, not raw lamports)
+   DEV_TOTAL_AMOUNT=100000000    # e.g., 100 million tokens
+   MARKETING_TOTAL_AMOUNT=50000000
+   PRESALE1_TOTAL_AMOUNT=100000000
+   PRESALE2_TOTAL_AMOUNT=50000000
+   ```
 
-  // Find PDA for vesting account
-  const [vestingAccount] = await PublicKey.findProgramAddress(
-    [Buffer.from('vesting'), devWallet.toBuffer()],
-    program.programId
-  )
+3. **Verify Admin Token Balance:**
+   Ensure the admin wallet has sufficient $TEAM tokens before initializing vesting accounts. The tokens will be transferred from this wallet to each vesting PDA's associated token account during initialization.
+   ```sh
+   spl-token balance <MINT_ADDRESS> --owner <ADMIN_PUBKEY>
+   ```
 
-  console.log(`Initializing Dev vesting account: ${vestingAccount.toString()}`)
+#### Running the Initialization Scripts
 
-  // Initialize vesting account
-  await program.methods
-    .initializeVesting({ dev: {} }, totalAmount, schedule)
-    .accounts({
-      vestingAccount: vestingAccount,
-      admin: provider.wallet.publicKey,
-      beneficiary: devWallet,
-      mint: mint,
-      systemProgram: anchor.web3.SystemProgram.programId
-    })
-    .rpc()
+Each vesting type has its own dedicated initialization script with appropriate vesting schedules defined according to the tokenomics:
 
-  console.log('Dev vesting initialized successfully!')
-}
+1. **Dev Team Vesting (10%, 12-month cliff):**
+   ```sh
+   npx ts-node scripts/initializeDevVesting.ts
+   ```
 
-async function initializeMarketingVesting(program: Program<Team>, mint: PublicKey, provider: anchor.AnchorProvider) {
-  // Marketing wallet beneficiary
-  const marketingWallet = new PublicKey(process.env.MARKETING_WALLET!)
-  const totalAmount = new anchor.BN(100_000_000 * 10 ** 9) // 10% of total supply with 9 decimals
+2. **Marketing Vesting (5%, gradual release):**
+   ```sh
+   npx ts-node scripts/initializeMarketingVesting.ts
+   ```
 
-  // Marketing vesting schedule: 10% at 2w, 15% at 6w, 25% at 10w, 50% at 14w
-  const schedule = [
-    { release_time: new anchor.BN(weeksFromNow(2)), amount: new anchor.BN(totalAmount.toNumber() * 0.1) },
-    { release_time: new anchor.BN(weeksFromNow(6)), amount: new anchor.BN(totalAmount.toNumber() * 0.15) },
-    { release_time: new anchor.BN(weeksFromNow(10)), amount: new anchor.BN(totalAmount.toNumber() * 0.25) },
-    { release_time: new anchor.BN(weeksFromNow(14)), amount: new anchor.BN(totalAmount.toNumber() * 0.5) }
-  ]
+3. **Presale 1 Vesting (10%, two releases):**
+   ```sh
+   npx ts-node scripts/initializePresale1Vesting.ts
+   ```
 
-  // Find PDA for vesting account
-  const [vestingAccount] = await PublicKey.findProgramAddress(
-    [Buffer.from('vesting'), marketingWallet.toBuffer()],
-    program.programId
-  )
+4. **Presale 2 Vesting (5%, TGE + gradual release):**
+   ```sh
+   npx ts-node scripts/initializePresale2Vesting.ts
+   ```
 
-  console.log(`Initializing Marketing vesting account: ${vestingAccount.toString()}`)
+Each script will:
+- Read configuration from the `.env` file
+- Derive the vesting account PDAs and token accounts
+- Create the necessary associated token accounts if they don't exist
+- Submit the initialization transaction
+- Log the transaction signature and important account addresses
 
-  // Initialize vesting account
-  await program.methods
-    .initializeVesting({ marketing: {} }, totalAmount, schedule)
-    .accounts({
-      vestingAccount: vestingAccount,
-      admin: provider.wallet.publicKey,
-      beneficiary: marketingWallet,
-      mint: mint,
-      systemProgram: anchor.web3.SystemProgram.programId
-    })
-    .rpc()
-
-  console.log('Marketing vesting initialized successfully!')
-}
-
-async function initializePresale1Vesting(program: Program<Team>, mint: PublicKey, provider: anchor.AnchorProvider) {
-  // Presale1 wallet beneficiary
-  const presale1Wallet = new PublicKey(process.env.PRESALE1_WALLET!)
-  const totalAmount = new anchor.BN(100_000_000 * 10 ** 9) // 10% of total supply with 9 decimals for primary presale
-
-  // Presale1 vesting schedule: 50% at 4w, 50% at 8w
-  const schedule = [
-    { release_time: new anchor.BN(weeksFromNow(4)), amount: new anchor.BN(totalAmount.toNumber() * 0.5) },
-    { release_time: new anchor.BN(weeksFromNow(8)), amount: new anchor.BN(totalAmount.toNumber() * 0.5) }
-  ]
-
-  // Find PDA for vesting account
-  const [vestingAccount] = await PublicKey.findProgramAddress(
-    [Buffer.from('vesting'), presale1Wallet.toBuffer()],
-    program.programId
-  )
-
-  console.log(`Initializing Presale1 vesting account: ${vestingAccount.toString()}`)
-
-  // Initialize vesting account
-  await program.methods
-    .initializeVesting({ presale1: {} }, totalAmount, schedule)
-    .accounts({
-      vestingAccount: vestingAccount,
-      admin: provider.wallet.publicKey,
-      beneficiary: presale1Wallet,
-      mint: mint,
-      systemProgram: anchor.web3.SystemProgram.programId
-    })
-    .rpc()
-
-  console.log('Presale1 vesting initialized successfully!')
-}
-
-async function initializePresale2Vesting(program: Program<Team>, mint: PublicKey, provider: anchor.AnchorProvider) {
-  // Presale2 wallet beneficiary
-  const presale2Wallet = new PublicKey(process.env.PRESALE2_WALLET!)
-  const totalAmount = new anchor.BN(50_000_000 * 10 ** 9) // 5% of total supply with 9 decimals for secondary presale
-
-  // Presale2 vesting schedule: 100% at 12w
-  const schedule = [{ release_time: new anchor.BN(weeksFromNow(12)), amount: new anchor.BN(totalAmount.toNumber()) }]
-
-  // Find PDA for vesting account
-  const [vestingAccount] = await PublicKey.findProgramAddress(
-    [Buffer.from('vesting'), presale2Wallet.toBuffer()],
-    program.programId
-  )
-
-  console.log(`Initializing Presale2 vesting account: ${vestingAccount.toString()}`)
-
-  // Initialize vesting account
-  await program.methods
-    .initializeVesting({ presale2: {} }, totalAmount, schedule)
-    .accounts({
-      vestingAccount: vestingAccount,
-      admin: provider.wallet.publicKey,
-      beneficiary: presale2Wallet,
-      mint: mint,
-      systemProgram: anchor.web3.SystemProgram.programId
-    })
-    .rpc()
-
-  console.log('Presale2 vesting initialized successfully!')
-}
-
-main().catch(err => {
-  console.error(err)
-  process.exit(1)
-})
+**Example Output:**
+```
+--- Initializing Dev Vesting ---
+Beneficiary: DevTeamPubkeyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+Total Amount: 100000000000000000 (100000000)
+Schedule: [{"releaseTime":"1782086400","amount":"100000000000000000"}]
+Vesting Account PDA: 8zJAzuEyL7RsvgCdQGMvRVvDjQz5rpWRFUkCJKJ7xyiZ
+Admin ATA: EoCo8zx6fZiAmwNxG3MvXhwkjgKja38RpLce8jzUQxMj
+Vesting ATA: 3xgKv5aCvNKRGBYkcQoLrwJxQUJyrrQJ4bQLKHkBnwez
+Initialization transaction signature 5VrdHS9hNVQbB2pT4RcqHPrVowguo3gmHf89er2qhXrEZBsXxegFr4UyWkJ2YWSB65atpqL6MfHZ9iGeiJrGBzZF
+Dev vesting initialized successfully!
 ```
 
-Save this script, then add the following environment variables to your `.env` file:
+#### Verification
 
-```
-TEAM_MINT=your_token_mint_address
-DEV_WALLET=dev_wallet_public_key
-MARKETING_WALLET=marketing_wallet_public_key
-PRESALE1_WALLET=presale1_wallet_public_key
-PRESALE2_WALLET=presale2_wallet_public_key
-```
-
-Run the script to initialize all vesting accounts:
+After running the initialization scripts, you can verify the vesting accounts using the provided `readVestingAccount.ts` script:
 
 ```sh
-# Make sure you're using the admin wallet configured in the Anchor program
-solana config set --keypair /path/to/admin.json
-
-# Run the script
-ts-node scripts/init-vesting.ts
+# Replace <VESTING_PDA> with the vesting account address output from the initialization script
+npx ts-node scripts/readVestingAccount.ts --pda <VESTING_PDA>
 ```
 
-### 7.3 Manual Initialization Using Anchor CLI
+This will display:
+- Beneficiary wallet address
+- Total and claimed token amounts
+- Vesting schedule with release dates
+- Wallet type (Dev, Marketing, Presale1, Presale2)
+- Other vesting account details
 
-Alternatively, you can use the Anchor CLI to initialize each vesting account:
+**Example Output:**
+```
+--- Reading Vesting Account: 8zJAzuEyL7RsvgCdQGMvRVvDjQz5rpWRFUkCJKJ7xyiZ ---
+Beneficiary (Authority): DevTeamPubkeyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+Mint: BomWBaPd9hm58Qgyb3uBube7uUrXmPs9D9ApkVRw2gyu
+Wallet Type: Dev
+Total Amount: 100000000000000000 (raw) / 100000000 (ui)
+Claimed Amount: 0 (raw) / 0 (ui)
+Bump: 255
+Schedule:
+  [0] Release Time: 1782086400 (2026-06-18T20:00:00.000Z)
+      Amount: 100000000000000000 (raw) / 100000000 (ui)
+```
 
+You can also check token balances:
 ```sh
-# For Dev wallet (5% of total supply)
-# 5% at 2w, 15% at 24w, 30% at 30w, 50% at 36w
-anchor run initialize-dev-vesting -- \
-  --beneficiary <DEV_WALLET_PUBKEY> \
-  --mint <TEAM_MINT> \
-  --amount 50000000000000000 \
-  --schedule '[{"release_time":<TIMESTAMP_2W>,"amount":<5%_AMOUNT>},{"release_time":<TIMESTAMP_24W>,"amount":<15%_AMOUNT>},{"release_time":<TIMESTAMP_30W>,"amount":<30%_AMOUNT>},{"release_time":<TIMESTAMP_36W>,"amount":<50%_AMOUNT>}]'
+# Check the vesting token account balance
+spl-token balance <MINT_ADDRESS> --owner <VESTING_PDA>
 
-# For Marketing wallet (10% of total supply)
-# 10% at 2w, 15% at 6w, 25% at 10w, 50% at 14w
-anchor run initialize-marketing-vesting -- \
-  --beneficiary <MARKETING_WALLET_PUBKEY> \
-  --mint <TEAM_MINT> \
-  --amount 100000000000000000 \
-  --schedule '[{"release_time":<TIMESTAMP_2W>,"amount":<10%_AMOUNT>},{"release_time":<TIMESTAMP_6W>,"amount":<15%_AMOUNT>},{"release_time":<TIMESTAMP_10W>,"amount":<25%_AMOUNT>},{"release_time":<TIMESTAMP_14W>,"amount":<50%_AMOUNT>}]'
-
-# For Presale1 wallet (10% of total supply)
-# 50% at 4w, 50% at 8w
-anchor run initialize-presale1-vesting -- \
-  --beneficiary <PRESALE1_WALLET_PUBKEY> \
-  --mint <TEAM_MINT> \
-  --amount 100000000000000000 \
-  --schedule '[{"release_time":<TIMESTAMP_4W>,"amount":<50%_AMOUNT>},{"release_time":<TIMESTAMP_8W>,"amount":<50%_AMOUNT>}]'
-
-# For Presale2 wallet (5% of total supply)
-# 100% at 12w
-anchor run initialize-presale2-vesting -- \
-  --beneficiary <PRESALE2_WALLET_PUBKEY> \
-  --mint <TEAM_MINT> \
-  --amount 50000000000000000 \
-  --schedule '[{"release_time":<TIMESTAMP_12W>,"amount":<FULL_AMOUNT>}]'
+# Check admin wallet balance after transfers
+spl-token balance <MINT_ADDRESS> --owner <ADMIN_PUBKEY>
 ```
-
-Replace placeholders with actual values:
-
-- `<DEV_WALLET_PUBKEY>`, `<MARKETING_WALLET_PUBKEY>`, etc.: Public keys of the beneficiary wallets
-- `<TEAM_MINT>`: Your token mint address
-- `<TIMESTAMP_XW>`: Unix timestamp for X weeks from now (calculate with `date -d "+X weeks" +%s`)
-- `<X%_AMOUNT>`: Corresponding amount in base units (with 9 decimals) for each percentage
 
 ### 7.4 Fund the Vesting Token Accounts
 
-After initializing the vesting accounts, you need to fund the token accounts that will hold the vested tokens:
+The initialization scripts automatically create and fund the vesting token accounts as part of the process. The scripts perform these steps:
 
-1. Derive the PDA for each vesting account:
+1. Derive the PDA for each vesting account using the beneficiary address
+2. Create the associated token account for the vesting PDA (if it doesn't exist)
+3. Transfer the specified token amount from the admin wallet to the vesting token account
 
+However, if you need to manually fund these accounts or add additional tokens, follow these steps:
+
+1. **Get the vesting account PDA:**
+   ```sh
+   # Run the readVestingAccount script to view the PDA
+   npx ts-node scripts/readVestingAccount.ts --pda <VESTING_PDA>
+   ```
+   or derive it manually:
    ```sh
    solana address --keypair /path/to/admin.json -s "[\"vesting\",\"<BENEFICIARY_PUBKEY>\"]" -k <PROGRAM_ID>
    ```
 
-2. Create token accounts for each vesting PDA:
-
+2. **Get the vesting account's associated token account:**
    ```sh
-   spl-token create-account <TEAM_MINT> --owner <VESTING_PDA>
+   spl-token accounts <VESTING_PDA> --verbose
    ```
 
-3. Transfer tokens from the admin/treasury to each vesting token account:
+3. **Transfer additional tokens if needed:**
    ```sh
-   spl-token transfer <TEAM_MINT> <AMOUNT> <VESTING_TOKEN_ACCOUNT> --from <ADMIN_TOKEN_ACCOUNT>
+   spl-token transfer <MINT_ADDRESS> <AMOUNT> <VESTING_TOKEN_ACCOUNT> --from <ADMIN_TOKEN_ACCOUNT> --fee-payer <ADMIN_KEYPAIR>
    ```
 
 ### Verification Commands
@@ -775,79 +674,8 @@ solana account <VESTING_ACCOUNT_PUBKEY>
 
 ## 8. DEX Liquidity & LP Token Burning
 
-- **Add liquidity to Raydium using the CLI**
-
-You can add liquidity to Raydium pools directly from the command line using the [Raydium CLI](https://github.com/raydium-io/raydium-cli). This is useful for automation, scripting, or when you want to avoid using the web UI.
-
-**Prerequisites:**
-
-- You have created and funded your $TEAM and SOL (or USDC) token accounts.
-- You have enough $TEAM and SOL/USDC in your accounts for the liquidity you want to provide.
-- You have installed the Raydium CLI:
-  ```sh
-  npm install -g @raydium-io/raydium-cli
-  ```
-  **Arguments:**
-  - `-g`: Installs the package globally so you can use the `raydium` command from anywhere.
-  - `@raydium-io/raydium-cli`: The Raydium CLI npm package name.
-- You know the pool address (AMM ID) for the $TEAM/SOL or $TEAM/USDC pool. (You can find this on Raydium's website or by searching Solana explorers.)
-
-**Step-by-step:**
-
-1. **Find or create the pool (if not already created):**
-
-   - Most likely, you will be adding liquidity to an existing pool.
-   - If the pool does not exist, you must create it first (see Raydium docs).
-
-2. **Add liquidity:**
-
-   ```sh
-   raydium add-liquidity \
-     --ammId <POOL_AMM_ID> \
-     --tokenA <TEAM_TOKEN_MINT> \
-     --tokenB <SOL_OR_USDC_MINT> \
-     --amountA <AMOUNT_TEAM> \
-     --amountB <AMOUNT_SOL_OR_USDC> \
-     --owner wallets/treasury.json \
-     --rpc https://devnet.helius-rpc.com/?api-key=5654c7b6-c88b-4cbf-a0aa-68fc3e84adb1
-   ```
-
-   **Arguments:**
-
-   - `--ammId <POOL_AMM_ID>`: The Raydium AMM pool address for the $TEAM/SOL or $TEAM/USDC pair.
-   - `--tokenA <TEAM_TOKEN_MINT>`: The mint address of your $TEAM token.
-   - `--tokenB <SOL_OR_USDC_MINT>`: The mint address of the paired token (SOL or USDC).
-   - `--amountA <AMOUNT_TEAM>`: The amount of $TEAM tokens to add as liquidity.
-   - `--amountB <AMOUNT_SOL_OR_USDC>`: The amount of SOL or USDC to add as liquidity.
-   - `--owner wallets/treasury.json`: The keypair file for the wallet providing liquidity (must have both tokens and SOL for fees).
-   - `--rpc <URL>`: The Solana RPC endpoint to use (here, devnet with your Helius API key).
-
-3. **Confirm the transaction:**
-
-   - The CLI will output a transaction signature.
-   - You can check the status on [Solana Explorer](https://explorer.solana.com/?cluster=devnet).
-
-4. **Verify your LP tokens:**
-   - After adding liquidity, you will receive LP tokens in your wallet.
-   - Check your LP token account with:
-     ```sh
-     spl-token accounts
-     ```
-     **Arguments:**
-     - This command lists all SPL token accounts owned by your wallet, including balances and mint addresses.
-
-**Additional verification steps for liquidity addition:**
-
-```sh
-# Verify liquidity pool exists and contains your tokens
-raydium info-pool --ammId <POOL_AMM_ID> --rpc <RPC_URL>
-# Should show pool information including token balances
-
-# Check pool on Raydium UI
-# Visit https://raydium.io/liquidity/?ammId=<POOL_AMM_ID> (mainnet)
-# or https://devnet.raydium.io/liquidity/?ammId=<POOL_AMM_ID> (devnet)
-# Should show your pool with correct token balances
-```
+- **Add liquidity to Raydium**
+  Add liquidity via the Raydium web UI
 
 - **Burn all LP tokens** (official method):
   ```sh
@@ -870,30 +698,204 @@ spl-token balance <LP_TOKEN_MINT> --owner <YOUR_PUBKEY>
 # Should return 0
 ```
 
-## 9. Claiming Unlocked Tokens
+## 9. Automated Token Distribution
 
-- **Beneficiaries** call `claim_unlocked` to transfer unlocked tokens to their wallet.
-- **Example TypeScript call:**
-  ```ts
-  await program.methods
-    .claimUnlocked()
-    .accounts({
-      vestingAccount: <VESTING_ACCOUNT_PUBKEY>,
-      authority: <BENEFICIARY_PUBKEY>,
-      vestingTokenAccount: <VESTING_TOKEN_ACCOUNT>,
-      destinationTokenAccount: <BENEFICIARY_TOKEN_ACCOUNT>,
-      vestingSigner: <VESTING_SIGNER_PDA>,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .signers([<BENEFICIARY_KEYPAIR>])
-    .rpc();
-  ```
-- **Check** how much is claimable (schedule, on-chain state).
-- **Verify** token transfers and balances.
+Instead of requiring beneficiaries to claim tokens manually, this system uses an automated approach where tokens are distributed periodically to eligible accounts. This design improves user experience by eliminating the need for manual claiming.
+
+### Automated Distribution System
+
+The automated token distribution system works as follows:
+
+1. **Scheduled Execution**
+   - A batch script runs on a schedule (e.g., daily, weekly)
+   - The script is executed by an administrator or automated service
+
+2. **Account Discovery**
+   - All vesting accounts in the program are scanned
+   - Each account's vesting schedule is checked against the current time
+   
+3. **Automatic Processing**
+   - For accounts with unlocked tokens, automated distribution occurs
+   - Tokens are transferred from the vesting account to the beneficiary's wallet
+   - Transaction records are maintained for auditing
+
+### Required Program Modifications
+
+To implement automated distribution, the Anchor program must be modified to include an admin distribution function:
+
+```rust
+// Add this function to lib.rs
+pub fn admin_distribute_unlocked(ctx: Context<AdminDistribute>) -> Result<()> {
+    // Verify admin authorization
+    require_keys_eq!(
+        ctx.accounts.admin.key(),
+        Pubkey::from_str(ADMIN_PUBKEY).unwrap(),
+        VestingError::Unauthorized
+    );
+    
+    // Calculate unlocked amount (similar to claim_unlocked logic)
+    let now = Clock::get()?.unix_timestamp as u64;
+    let vesting = &mut ctx.accounts.vesting_account;
+    
+    // Calculate claimable amount
+    let mut unlocked_amount = 0;
+    for schedule_item in vesting.schedule.iter() {
+        if now >= schedule_item.release_time {
+            unlocked_amount += schedule_item.amount;
+        }
+    }
+    
+    // Subtract already claimed
+    let claimable = unlocked_amount.checked_sub(vesting.claimed_amount)
+        .ok_or(VestingError::NothingToClaim)?;
+    
+    if claimable == 0 {
+        return err!(VestingError::NothingToClaim);
+    }
+    
+    // Transfer tokens
+    let seeds = &[
+        b"vesting".as_ref(),
+        vesting.authority.as_ref(),
+        &[vesting.bump],
+    ];
+    let signer = &[&seeds[..]]; 
+    
+    // Execute the transfer
+    token::transfer(
+        CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            token::Transfer {
+                from: ctx.accounts.vesting_token_account.to_account_info(),
+                to: ctx.accounts.destination_token_account.to_account_info(),
+                authority: ctx.accounts.vesting_signer.to_account_info(),
+            },
+            signer,
+        ),
+        claimable,
+    )?;
+    
+    // Update claimed amount
+    vesting.claimed_amount = vesting.claimed_amount.checked_add(claimable)
+        .ok_or(VestingError::MathOverflow)?;
+        
+    msg!("Admin distributed {} tokens to {}", claimable, vesting.authority);
+    
+    Ok(())
+}
+```
+
+Add the corresponding account validation struct:
+
+```rust
+#[derive(Accounts)]
+pub struct AdminDistribute<'info> {
+    /// The admin account (must match ADMIN_PUBKEY)
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    
+    /// The vesting account
+    #[account(mut)]
+    pub vesting_account: Account<'info, VestingAccount>,
+    
+    /// The beneficiary
+    /// CHECK: We're only using this for reference, not signing
+    pub authority: UncheckedAccount<'info>,
+    
+    /// The vesting token account (source)
+    #[account(mut, 
+        constraint = vesting_token_account.mint == vesting_account.mint,
+        constraint = vesting_token_account.owner == vesting_signer.key()
+    )]
+    pub vesting_token_account: Account<'info, TokenAccount>,
+    
+    /// The destination token account (beneficiary's account)
+    #[account(mut, 
+        constraint = destination_token_account.mint == vesting_account.mint,
+        constraint = destination_token_account.owner == vesting_account.authority
+    )]
+    pub destination_token_account: Account<'info, TokenAccount>,
+    
+    /// The vesting PDA acting as signer
+    /// CHECK: This is checked in the constraint
+    #[account(seeds = [b"vesting", vesting_account.authority.as_ref()], bump = vesting_account.bump)]
+    pub vesting_signer: UncheckedAccount<'info>,
+    
+    /// The token program
+    pub token_program: Program<'info, Token>,
+}
+```
+
+### Batch Processing Script
+
+The repository includes a script for automated distribution in `scripts/batchReleaseTokens.ts`. This script:
+
+1. Scans all vesting accounts managed by the program
+2. Identifies accounts with unlocked, unclaimed tokens
+3. Processes distribution for all eligible accounts
+4. Generates detailed logs for tracking and auditing
+
+To run the batch distribution process:
+
+```sh
+# Daily/weekly job to release tokens to all eligible accounts
+npx ts-node scripts/batchReleaseTokens.ts
+```
+
+The script produces a log file in the `logs` directory with the timestamp, transaction details, and summary statistics.
+
+### Configuration and Scheduling
+
+For production deployment, set up the batch distribution to run automatically:
+
+1. **Using Cron (Linux/Unix/macOS):**
+   ```sh
+   # Run daily at 2 AM
+   0 2 * * * cd /path/to/token-core && npx ts-node scripts/batchReleaseTokens.ts >> /path/to/token-core/logs/cron.log 2>&1
+   ```
+
+2. **Using Task Scheduler (Windows):**
+   - Create a scheduled task that runs the script using a batch file
+   - Set the desired frequency (daily/weekly)
+
+3. **Using Cloud Services:**
+   - AWS Lambda with EventBridge trigger
+   - Google Cloud Functions with Cloud Scheduler
+   - Azure Functions with Timer trigger
+
+### Verification and Monitoring
+
+After each batch run, verify the distribution results:
+
+```sh
+# View the latest distribution log
+cat logs/batch-release-<latest-timestamp>.log
+
+# Check specific beneficiary's token balance
+spl-token balance <MINT_ADDRESS> --owner <BENEFICIARY_PUBKEY>
+
+# View vesting account state
+npx ts-node scripts/readVestingAccount.ts --pda <VESTING_PDA_ADDRESS>
+```
+
+### Verifying Claims
+
+After claiming tokens, verify the following:
+1. Beneficiary's token account balance has increased
+2. Vesting account's token account balance has decreased
+3. The claimed_amount in the vesting account state has been updated
+
+To check the vesting account's state after claiming:
+```sh
+npx ts-node scripts/readVestingAccount.ts --pda <VESTING_PDA_ADDRESS>
+```
 
 **Detailed verification steps:**
 
 ```sh
+# Check beneficiary's token balance
+spl-token balance <MINT_ADDRESS> --owner <BENEFICIARY_PUBKEY>
+
 # Check token balances before and after claiming
 spl-token balance <TEAM_MINT> --owner <BENEFICIARY_PUBKEY>
 # Should increase after claiming
